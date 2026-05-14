@@ -158,12 +158,12 @@ with col2:
     )
 
 with col3:
-    calorie_percent = min(total_calories / st.session_state.calorie_goal, 1)
+    calorie_percent = min(total_calories / st.session_state.calorie_goal, 1.0)
     st.metric("Calorie goal", f"{st.session_state.calorie_goal} kcal")
     st.progress(calorie_percent)
 
 with col4:
-    protein_percent = min(total_protein / st.session_state.protein_goal, 1)
+    protein_percent = min(total_protein / st.session_state.protein_goal, 1.0)
     st.metric("Protein goal", f"{st.session_state.protein_goal} g")
     st.progress(protein_percent)
 

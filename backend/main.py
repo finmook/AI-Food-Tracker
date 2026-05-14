@@ -173,7 +173,7 @@ def get_today_logs():
         response = (
             supabase
             .table("food_logs")
-            .select("*")
+            .select("id,food_name,quantity,meal_type,calories,protein,source,eaten_at,created_at")
             .gte("eaten_at", f"{today}T00:00:00")
             .lte("eaten_at", f"{today}T23:59:59")
             .order("eaten_at", desc=True)
