@@ -1,61 +1,62 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List,Optional
-from datetime import datetime
+from typing import Optional
+from datetime import date, datetime, timedelta
+
 from database import supabase
 from ai_service import parse_food_text
+
+
 class FoodTextInput(BaseModel):
-    text:str
+    text: str
+
 
 class FoodItem(BaseModel):
-    food_name:str
-    quantity:str
-    meal_type:Optional[str]="snack"
+    food_name: str
+    quantity: str
+    meal_type: Optional[str] = "snack"
     calories: int
-    protein:float
-    source: str="manual"
+    protein: float
+    source: str = "manual"
+
 
 class FoodLog(FoodItem):
     id: int
-    eaten_at:str
+    eaten_at: str
+
 
 class WeeklySummaryItem(BaseModel):
-    day:str
-    total_calories:int
+    day: str
+    total_calories: int
     total_protein: float
 
 
-app=FastAPI(
+app = FastAPI(
     title="AI Food Tracker API",
     version="0.1.0"
 )
 
-food_logs = [
-    {
-        "id": 1,
-        "food_name": "Boiled egg",
-        "quantity": "2 pcs",
-        "meal_type": "breakfast",
-        "calories": 140,
-        "protein": 12.0,
-        "source": "manual",
-        "eaten_at": "2026-05-13T08:00:00"
-    },
-    {
-        "id": 2,
-        "food_name": "Rice",
-        "quantity": "1 bowl",
-        "meal_type": "lunch",
-        "calories": 220,
-        "protein": 4.0,
-        "source": "manual",
-        "eaten_at": "2026-05-13T12:00:00"
-    }
-]
+
+def build_final_items(ai_result: dict) -> list:
+    final_items = []
+
+    for item in ai_result.get("items", []):
+        final_items.append({
+            "food_name": item.get("food_name", "unknown food"),
+            "quantity": item.get("quantity", "1 serving"),
+            "meal_type": item.get("meal_type", "snack"),
+            "calories": item.get("calories", 0),
+            "protein": item.get("protein", 0),
+            "source": "ai_estimate",
+        })
+
+    return final_items
+
 
 @app.get("/")
 def root():
-    return {"message":"AI Food Tracker API is running"}
+    return {"message": "AI Food Tracker API is running"}
+
 
 @app.get("/health")
 def health_check():
@@ -64,82 +65,207 @@ def health_check():
         "message": "AI Food Tracker API is running"
     }
 
+
 @app.post("/analyze-food")
 def analyze_food(data: FoodTextInput):
-    return {
-        "original_text":data.text,
-        "items":[
-            {
-                "food_name":"Boiled egg",
-                "quantity":"2 pcs",
-                "calories": 140,
-                "protein":12.0,
-                "source":"ai_estimate"
-            },
-            {
-                "food_name":"Rice",
-                "quantity":"1 bowl",
-                "calories": 220,
-                "protein":4.0,
-                "source": "ai_estimate"
-            }
-        ]
+    try:
+        ai_result = parse_food_text(data.text)
+        final_items = build_final_items(ai_result)
 
-    }
+        return {
+            "original_text": data.text,
+            "ai_result": ai_result,
+            "final_items": final_items
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/food-logs")
 def create_food_log(item: FoodItem):
-    new_log={
-        "id":len(food_logs)+1,
-        "food_name": item.food_name,
-        "quantity":item.quantity,
-        "meal_type":item.meal_type,
-        "calories":item.calories,
-        "protein":item.protein,
-        "source":item.source,
-        "eaten_at": datetime.now().isoformat()
-    }
+    try:
+        new_log = item.model_dump()
+        new_log["eaten_at"] = datetime.now().isoformat()
 
-    food_logs.append(new_log)
+        response = (
+            supabase
+            .table("food_logs")
+            .insert(new_log)
+            .execute()
+        )
 
-    return {
-        "message":"Food log saved",
-        "data":new_log
-    }
+        return {
+            "message": "Food log saved",
+            "data": response.data[0]
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/food-logs/ai")
+def create_food_log_from_ai(data: FoodTextInput):
+    try:
+        ai_result = parse_food_text(data.text)
+        final_items = build_final_items(ai_result)
+
+        if not final_items:
+            raise HTTPException(status_code=400, detail="No food items detected")
+
+        logs_to_insert = []
+
+        for item in final_items:
+            logs_to_insert.append({
+                "food_name": item["food_name"],
+                "quantity": item["quantity"],
+                "meal_type": item["meal_type"],
+                "calories": item["calories"],
+                "protein": item["protein"],
+                "source": item["source"],
+                "eaten_at": datetime.now().isoformat()
+            })
+
+        response = (
+            supabase
+            .table("food_logs")
+            .insert(logs_to_insert)
+            .execute()
+        )
+
+        return {
+            "message": "AI food logs saved",
+            "original_text": data.text,
+            "ai_result": ai_result,
+            "final_items": final_items,
+            "data": response.data
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/food-logs")
+def get_all_food_logs():
+    try:
+        response = (
+            supabase
+            .table("food_logs")
+            .select("*")
+            .order("eaten_at", desc=True)
+            .execute()
+        )
+
+        return response.data
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/food-logs/today")
 def get_today_logs():
-    return food_logs
+    try:
+        today = date.today().isoformat()
+
+        response = (
+            supabase
+            .table("food_logs")
+            .select("*")
+            .gte("eaten_at", f"{today}T00:00:00")
+            .lte("eaten_at", f"{today}T23:59:59")
+            .order("eaten_at", desc=True)
+            .execute()
+        )
+
+        return response.data
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/food-logs/weekly")
 def get_weekly_summary():
-    return [
-        {"day": "2026-05-07", "total_calories": 1800, "total_protein": 90},
-        {"day": "2026-05-08", "total_calories": 2100, "total_protein": 105},
-        {"day": "2026-05-09", "total_calories": 1900, "total_protein": 95},
-        {"day": "2026-05-10", "total_calories": 2300, "total_protein": 120},
-        {"day": "2026-05-11", "total_calories": 1750, "total_protein": 85},
-        {"day": "2026-05-12", "total_calories": 2000, "total_protein": 100},
-        {"day": "2026-05-13", "total_calories": 360, "total_protein": 16},
-    ]
+    try:
+        start_date = date.today() - timedelta(days=6)
+
+        response = (
+            supabase
+            .table("food_logs")
+            .select("*")
+            .gte("eaten_at", f"{start_date.isoformat()}T00:00:00")
+            .order("eaten_at", desc=True)
+            .execute()
+        )
+
+        logs = response.data
+        summary = {}
+
+        for i in range(7):
+            current_day = start_date + timedelta(days=i)
+
+            summary[current_day.isoformat()] = {
+                "day": current_day.isoformat(),
+                "total_calories": 0,
+                "total_protein": 0
+            }
+
+        for log in logs:
+            day = log["eaten_at"][:10]
+
+            if day in summary:
+                summary[day]["total_calories"] += log.get("calories", 0) or 0
+                summary[day]["total_protein"] += log.get("protein", 0) or 0
+
+        return list(summary.values())
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.delete("/food-logs/{log_id}")
-def delete_food_log(log_id:int):
-    global food_logs
-    food_logs=[log for log in food_logs if log["id"] != log_id]
-    return {"message":"Food log deleted"}
+def delete_food_log(log_id: int):
+    try:
+        response = (
+            supabase
+            .table("food_logs")
+            .delete()
+            .eq("id", log_id)
+            .execute()
+        )
+
+        return {
+            "message": "Food log deleted",
+            "data": response.data
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.put("/food-logs/{log_id}")
-def update_food_log(log_id:int,item:FoodItem):
-    for log in food_logs:
-        if log["id"]==log_id:
-            log.pudate({
-                "food_name":item.food_name,
-                "quantity":item.quantity,
-                "meal_type":item.meal_type,
-                "calories":item.calories,
-                "protein": item.protein,
-                "source":item.source
-            })
-            return {"message":"Food log updated","data":log}
-    return {"message":"Food log not found"}
+def update_food_log(log_id: int, item: FoodItem):
+    try:
+        response = (
+            supabase
+            .table("food_logs")
+            .update(item.model_dump())
+            .eq("id", log_id)
+            .execute()
+        )
+
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Food log not found")
+
+        return {
+            "message": "Food log updated",
+            "data": response.data[0]
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
