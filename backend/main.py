@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List,Optional
 from datetime import datetime
+from database import supabase
+from ai_service import parse_food_text
 class FoodTextInput(BaseModel):
     text:str
 
