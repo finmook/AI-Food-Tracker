@@ -298,7 +298,8 @@ else:
             y=weekly_df["total_protein"],
             name="Protein (g)",
             mode="lines+markers",
-            yaxis="y1"
+            yaxis="y1",
+            line=dict(color='orange')
         )
     )
 
@@ -308,7 +309,9 @@ else:
             y=weekly_df["total_calories"],
             name="Calories (kcal)",
             mode="lines+markers",
-            yaxis="y2"
+            yaxis="y2",
+            line=dict(color='yellow')
+            
         )
     )
 
