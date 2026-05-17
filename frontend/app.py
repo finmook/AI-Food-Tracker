@@ -61,6 +61,9 @@ def api_delete(path: str):
     except requests.exceptions.RequestException as e:
         st.error(f"Backend error: {e}")
         return None
+    
+def clear_input():
+    st.session_state["input_text"]=""
 
 
 if "calorie_goal" not in st.session_state:
@@ -97,7 +100,8 @@ st.sidebar.subheader("🍽️ Add food")
 food_text = st.sidebar.text_area(
     "What did you eat?",
     placeholder="Example: 2 eggs 1 chicken breast",
-    height=120
+    height=120,
+    key="input_text"
 )
 
 if st.sidebar.button("Analyze with AI", use_container_width=True):
@@ -119,6 +123,13 @@ if st.sidebar.button("Analyze and Save directly", use_container_width=True):
             st.sidebar.success("Food saved to database.")
             st.session_state.analyzed_result = None
             st.rerun()
+
+
+st.sidebar.button(
+    "Clear",
+    use_container_width=True,
+    on_click=clear_input
+)
 
 
 st.title("🍱 AI Food Tracker")
@@ -285,7 +296,7 @@ else:
 
 
 st.divider()
-st.subheader("📊 Weekly Summary")
+st.subheader("🕰️ Weekly Summary")
 
 if weekly_df.empty:
     st.info("No weekly data yet.")
